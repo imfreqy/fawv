@@ -1,0 +1,22 @@
+<svg viewBox="0 0 540 140" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="FAvvV wordmark">
+  <defs><linearGradient id="brandGrad" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#10B981"/><stop offset="50%" stop-color="#14B8A6"/><stop offset="100%" stop-color="#4F46E5"/></linearGradient></defs>
+  <!-- Left: FA -->
+  <text x="6" y="100" font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+        font-weight="800" font-size="86" fill="#111827" letter-spacing="-1.5">FA</text>
+  
+  <!-- Middle: double-V ligature (vv) -->
+  <!-- Designed to sit tightly between A and final V; minimal padding in viewBox -->
+  <g transform="translate(185,0)" stroke="url(#brandGrad)" fill="none" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+    <!-- first v -->
+    <path d="M 8 40 L 36 98 L 64 40" />
+    <!-- second v, slightly overlapped to feel like a cohesive W -->
+    <path d="M 56 40 L 84 98 L 112 40" />
+  </g>
+  
+  <!-- Right: final V -->
+  <text x="318" y="100" font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+        font-weight="800" font-size="86" fill="#111827" letter-spacing="-1">V</text>
+  
+  <!-- Optional small tagline for spacing reference (comment out if not needed) -->
+  <!-- <text x="8" y="130" font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-weight="500" font-size="16" fill="#111827" opacity="0.6">For All We Value</text> -->
+</svg>

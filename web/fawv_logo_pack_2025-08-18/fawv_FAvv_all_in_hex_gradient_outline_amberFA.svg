@@ -1,0 +1,18 @@
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="FAvv-hex logo (gradient outline, amber FA)">
+  <defs>
+    <linearGradient id="brandGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#10B981"/>
+      <stop offset="50%" stop-color="#14B8A6"/>
+      <stop offset="100%" stop-color="#4F46E5"/>
+    </linearGradient>
+  </defs>
+  <polygon points="100,16 172.7,58 172.7,142 100,184 27.3,142 27.3,58"
+           fill="none" stroke="url(#brandGrad)" stroke-width="10" stroke-linejoin="round"/>
+  <text x="94" y="118" text-anchor="end"
+        font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+        font-weight="800" font-size="48" fill="#F59E0B" letter-spacing="-1">FA</text>
+  <g fill="none" stroke="url(#brandGrad)" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 98 90 L 118 140 L 138 90" />
+    <path d="M 128 90 L 148 140 L 168 90" />
+  </g>
+</svg>

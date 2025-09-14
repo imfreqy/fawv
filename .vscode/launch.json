@@ -1,0 +1,24 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    
+    {
+      "name": "Chrome: Vite app",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:5173",
+      "webRoot": "${workspaceFolder}/web/src"
+    },
+    {
+      "name": "Vite dev server (web)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run dev",
+      "cwd": "${workspaceFolder}/web"
+    },
+  ],
+  "compounds": [
+    { "name": "Vite + Chrome", "configurations": ["Vite dev server (web)", "Chrome: Vite app"] }
+  ]
+}
+
