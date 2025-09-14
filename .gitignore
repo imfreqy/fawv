@@ -1,0 +1,31 @@
+# macOS
+.DS_Store
+
+# Node / Vite
+node_modules/
+dist/
+.vite/
+*.log
+coverage/
+
+# Build artifacts
+*.local
+.env
+.env.*
+!.env.example
+
+# VS Code
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+
+# Mono subfolders
+web/node_modules/
+api/node_modules/
+contract/node_modules/
+web/dist/
+api/dist/
+
+# OS/Editor
+Thumbs.db
+
