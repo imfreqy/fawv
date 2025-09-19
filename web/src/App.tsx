@@ -1,5 +1,7 @@
 import React, { useMemo, useRef, useState } from "react";
 import Logo from "./components/brand/Logo";
+// ---- API base (dev uses Vite proxy if empty) ----
+const API_BASE = import.meta.env.VITE_API_BASE || "";
 
 // FAWV Landing + Demo (merged, regenerated)
 // Single-file App.tsx to drop into Vite + React + Tailwind.
@@ -16,6 +18,18 @@ type Product = "Permanence" | "Permanence+" | "Heirloom";
 type EscrowYears = 3 | 5 | 10;
 
 type VaultVisibility = "PUBLIC" | "PRIVATE";
+
+// ---- Types returned by /api/upload/start ----
+type PresignItem = {
+  relPath: string;
+  objectKey: string;
+  s3Uri: string;
+  uploadUrl: string;
+  contentType: string;
+};
+type PresignResponse = { sessionId: string; items: PresignItem[] };
+
+
 
 interface DemoFile {
   file: File;
@@ -44,6 +58,47 @@ function randomHex(bytes = 20) {
 function copy(text: string) {
   navigator.clipboard.writeText(text).catch(() => {});
 }
+
+async function sha256Hex(buf: ArrayBuffer): Promise<string> {
+  const hash = await crypto.subtle.digest("SHA-256", buf);
+  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+// ---- Call your API to get presigned URLs ----
+async function getPresignedPlan(
+  sessionId: string,
+  fileList: DemoFile[]
+): Promise<PresignResponse> {
+  const payload = {
+    sessionId,
+    files: fileList.map((f) => ({
+      relPath: f.fullPath,
+      size: f.file.size,
+      contentType: f.file.type || "application/octet-stream",
+    })),
+  };
+  const res = await fetch(`${API_BASE}/api/upload/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`presign failed: ${res.status}`);
+  return res.json();
+}
+// Simple demo hash: concatenates file bytes in sorted path order.
+// NOTE: For very large folders this will be slow; fine for demo.
+async function hashFilesSHA256(list: DemoFile[]): Promise<string> {
+  const sorted = [...list].sort((a, b) => a.fullPath.localeCompare(b.fullPath));
+  const blobs: BlobPart[] = [];
+  for (const item of sorted) {
+    // include path to make the hash path-aware
+    blobs.push(item.fullPath, "\n");
+    blobs.push(await item.file.arrayBuffer());
+  }
+  const ab = await new Blob(blobs).arrayBuffer();
+  return sha256Hex(ab);
+}
+
 
 // ---------------------- Mock Pricing ----------------------
 // Demo rates; adjust freely. Per-GB (rounded up) + tokenization fee.
@@ -170,7 +225,7 @@ function fromInputFileList(files: FileList): DemoFile[] {
     const f = files[i];
     // @ts-expect-error vendor property
     const rel = (f as any).webkitRelativePath || f.name;
-    arr.append ? arr.append({ file: f, fullPath: rel }) : arr.push({ file: f, fullPath: rel });
+    arr.push({ file: f, fullPath: rel });
   }
   return arr;
 }
@@ -186,6 +241,10 @@ export default function App() {
   const [product, setProduct] = useState<Product | null>(null);
   const [escrowYears, setEscrowYears] = useState<EscrowYears>(3);
   const [files, setFiles] = useState<DemoFile[]>([]);
+  const [sessionId] = useState(() => randomHex(8));
+  const [uploading, setUploading] = useState(false);
+  const [uploadPct, setUploadPct] = useState(0);
+  const [uploadedItems, setUploadedItems] = useState<PresignItem[] | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [vaultName, setVaultName] = useState("");
   const [acceptedPrice, setAcceptedPrice] = useState(false);
@@ -197,7 +256,63 @@ export default function App() {
   const [demoEthPrice, setDemoEthPrice] = useState<number>(3200); // USD per ETH (demo)
   const [lockedEndowment, setLockedEndowment] = useState<null | { usd: number; eth: number; usdPerEth: number }>(null);
 
+  // S3 uploader (calls /api/upload/start then PUTs each file)
+
+async function uploadToS3(source: DemoFile[] = files) {
+  if (!source.length) return;
+  setUploading(true);
+  setUploadPct(0);
+  try {
+    const plan = await getPresignedPlan(sessionId, source);
+    let done = 0;
+
+    for (const item of plan.items) {
+      const match = source.find((x) => x.fullPath === item.relPath);
+      if (!match) continue;
+
+      // IMPORTANT: your presigned URL includes x-amz-server-side-encryption,
+      // so we must send the same header (AES256) on the PUT.
+      const resp = await fetch(item.uploadUrl, {
+        method: "PUT",
+        body: match.file,
+      });
+
+      // ⬇️ NEW: log S3's error XML so we can see the exact reason if it fails
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => "");
+        console.error("S3 PUT failed", {
+          path: item.relPath,
+          status: resp.status,
+          statusText: resp.statusText,
+          body: text,
+        });
+        throw new Error(`upload failed: ${item.relPath}`);
+      }
+
+      done++;
+      setUploadPct(Math.round((done / plan.items.length) * 100));
+    }
+
+    setUploadedItems(plan.items);
+    console.log("S3 uploaded", {
+      sessionId,
+      count: plan.items.length,
+      first: plan.items[0]?.objectKey,
+    });
+  } catch (e) {
+    console.error("S3 upload error", e);
+    alert("Upload failed. Check console.");
+    setUploadedItems(null);
+  } finally {
+    setUploading(false);
+  }
+}
+
+  // NEW: locked archive hash (computed once after pricing)
+const [archiveHash, setArchiveHash] = useState<string>("");
+
   const [step, setStep] = useState<
+  
     | "selectProduct"
     | "upload"
     | "pricing"
@@ -244,6 +359,8 @@ export default function App() {
     if (e.dataTransfer?.items) {
       const picked = await fromDataTransfer(e.dataTransfer.items);
       if (picked.length) setFiles(picked);
+      // NEW: auto upload
+      uploadToS3(picked);
     }
   };
 
@@ -271,28 +388,35 @@ export default function App() {
     setStarted(true); // stay in demo mode for another build
   };
 
-  const proceedAfterPricing = () => {
-    // require accepted pricing and a vault name
-    if (!acceptedPrice || !vaultName.trim()) return;
-    // validate optional endowment USD if provided and lock the conversion at this moment
-    const trimmed = (endowmentUsd ?? "").toString().trim();
-    if (trimmed !== "") {
-      const num = parseFloat(trimmed);
-      if (Number.isNaN(num) || num < 0) {
-        setEndowmentError("Please enter a valid non‑negative USD amount for Endowment, or leave blank.");
-        return;
-      } else {
-        const usdPerEth = demoEthPrice && demoEthPrice > 0 ? demoEthPrice : 1;
-        const usd = num;
-        const eth = usd / usdPerEth;
-        setLockedEndowment({ usd, eth, usdPerEth });
-      }
+  const proceedAfterPricing = async () => {
+  // require accepted pricing and a vault name
+  if (!acceptedPrice || !vaultName.trim()) return;
+
+  // validate optional endowment USD if provided and lock conversion at this moment
+  const trimmed = (endowmentUsd ?? "").toString().trim();
+  if (trimmed !== "") {
+    const num = parseFloat(trimmed);
+    if (Number.isNaN(num) || num < 0) {
+      setEndowmentError("Please enter a valid non-negative USD amount for Endowment, or leave blank.");
+      return;
     } else {
-      setLockedEndowment(null);
+      const usdPerEth = demoEthPrice && demoEthPrice > 0 ? demoEthPrice : 1;
+      const usd = num;
+      const eth = usd / usdPerEth;
+      setLockedEndowment({ usd, eth, usdPerEth });
     }
-    setEndowmentError(null);
-    setStep("manifest");
-  };
+  } else {
+    setLockedEndowment(null);
+  }
+  setEndowmentError(null);
+
+  // NEW: compute archive hash once pricing is accepted
+  const hash = files.length ? await hashFilesSHA256(files) : "";
+  setArchiveHash(hash);
+
+  setStep("manifest");
+};
+
 
   const startMint = async () => {
     if (!visibility || !manifest.trim()) return;
@@ -319,21 +443,23 @@ export default function App() {
     const owner = `0x${randomHex(20)}`; // mock owner address
 
     const tokenMeta = {
-      name: `${vaultName} — FAWV Vault`,
-      description:
-        "Demo ERC-721 style token representing a FAWV Vault (mock, non-transferable in demo).",
-      image: imageDataUrl,
-      attributes: [
-        { trait_type: "Product", value: product },
-        { trait_type: "Escrow Years", value: product === "Permanence+" ? escrowYears : undefined },
-        { trait_type: "Total Files", value: files.length },
-        { trait_type: "Total Size", value: formatBytes(totalBytes) },
-        { trait_type: "Visibility", value: visibility },
-        { trait_type: "Endowment (USD)", value: lockedEndowment ? Number(lockedEndowment.usd.toFixed(2)) : undefined },
-        { trait_type: "Endowment (ETH at time)", value: lockedEndowment ? Number(lockedEndowment.eth.toFixed(6)) : undefined },
-        { trait_type: "Endowment Rate (USD/ETH)", value: lockedEndowment ? Number(lockedEndowment.usdPerEth.toFixed(2)) : undefined },
-      ].filter((a) => a.value !== undefined),
-    };
+  name: `${vaultName} — FAWV Vault`,
+  description:
+    "Demo ERC-721 style token representing a FAWV Vault (mock, non-transferable in demo).",
+  image: imageDataUrl,
+  attributes: [
+    { trait_type: "Product", value: product },
+    { trait_type: "Escrow Years", value: product === "Permanence+" ? escrowYears : undefined },
+    { trait_type: "Total Files", value: files.length },
+    { trait_type: "Total Size", value: formatBytes(totalBytes) },
+    { trait_type: "Visibility", value: visibility },
+    { trait_type: "Archive Hash (SHA-256)", value: archiveHash || "(none)" },
+    { trait_type: "Endowment (USD)", value: lockedEndowment ? Number(lockedEndowment.usd.toFixed(2)) : undefined },
+    { trait_type: "Endowment (ETH at time)", value: lockedEndowment ? Number(lockedEndowment.eth.toFixed(6)) : undefined },
+    { trait_type: "Endowment Rate (USD/ETH)", value: lockedEndowment ? Number(lockedEndowment.usdPerEth.toFixed(2)) : undefined },
+  ].filter((a) => a.value !== undefined),
+};
+
 
     const tokenUriJson = JSON.stringify(tokenMeta, null, 2);
 
@@ -737,7 +863,7 @@ export default function App() {
                     <div className="p-6 rounded-2xl border border-white/10 bg-white/5">
                       <h3 className="font-semibold mb-2">Preview</h3>
                       <div className="text-xs text-zinc-400 mb-2">Vault: {vaultName || "(unnamed)"}</div>
-                      <div className="rounded-2xl border border-white/10 bg-black/30 p-4 whitespace-pre-wrap text-sm">{manifest || "(Your manifest will render here.)"}</div>
+                      <div className="rounded-2xl border border-white/10 bg-black/30 p-4 whitespace-pre-wrap break-words text-sm min-h-[8rem] max-w-full">{manifest || "(Your manifest will render here.)"}</div>
                     </div>
                   </div>
                 )}
@@ -754,43 +880,61 @@ export default function App() {
                 {/* Vault Screen */}
                 {step === "vault" && (
                   <div className="grid md:grid-cols-2 gap-6 items-start">
-                    <div className="p-6 rounded-2xl border border-white/10 bg-white/5">
+                    <div className="p-6 rounded-2xl border border-white/10 bg-white/5 min-w-0">
+
                       <h2 className="text-xl font-semibold mb-2">Your Demo Vault</h2>
                       <table className="w-full text-sm">
                         <tbody>
-                          <tr>
-                            <td className="py-2 text-zinc-400">Vault Name</td>
-                            <td className="py-2 text-right">{vaultName}</td>
-                          </tr>
-                          <tr>
-                            <td className="py-2 text-zinc-400">Product</td>
-                            <td className="py-2 text-right">{product}{product === "Permanence+" ? ` (${escrowYears}yr)` : ""}</td>
-                          </tr>
-                          <tr>
-                            <td className="py-2 text-zinc-400">Files</td>
-                            <td className="py-2 text-right">{files.length}</td>
-                          </tr>
-                          <tr>
-                            <td className="py-2 text-zinc-400">Total Size</td>
-                            <td className="py-2 text-right">{formatBytes(totalBytes)}</td>
-                          </tr>
-                          <tr>
-                            <td className="py-2 text-zinc-400">Visibility</td>
-                            <td className="py-2 text-right">{visibility}</td>
-                          </tr>
-                          <tr>
-                            <td className="py-2 text-zinc-400">Endowment</td>
-                            <td className="py-2 text-right">{lockedEndowment ? `$${lockedEndowment.usd.toFixed(2)} · ${lockedEndowment.eth.toFixed(6)} ETH` : "None"}</td>
-                          </tr>
-                          <tr>
-                            <td className="py-2 text-zinc-400">Endowment Rate</td>
-                            <td className="py-2 text-right">{lockedEndowment ? `$${lockedEndowment.usdPerEth.toFixed(2)} / ETH` : "—"}</td>
-                          </tr>
-                          <tr>
-                            <td className="py-2 text-zinc-400">Status</td>
-                            <td className="py-2 text-right">Minted (demo)</td>
-                          </tr>
-                        </tbody>
+  <tr>
+    <td className="py-2 text-zinc-400">Vault Name</td>
+    <td className="py-2 text-right">{vaultName}</td>
+  </tr>
+  <tr>
+    <td className="py-2 text-zinc-400">Product</td>
+    <td className="py-2 text-right">
+      {product}
+      {product === "Permanence+" ? ` (${escrowYears}yr)` : ""}
+    </td>
+  </tr>
+  <tr>
+    <td className="py-2 text-zinc-400">Files</td>
+    <td className="py-2 text-right">{files.length}</td>
+  </tr>
+  <tr>
+    <td className="py-2 text-zinc-400">Total Size</td>
+    <td className="py-2 text-right">{formatBytes(totalBytes)}</td>
+  </tr>
+
+  {/* NEW: Archive Hash row */}
+  <tr>
+    <td className="py-2 text-zinc-400">Archive Hash</td>
+    <td className="py-2 text-right font-mono text-xs break-all">{archiveHash || "—"}</td>
+  </tr>
+
+  <tr>
+    <td className="py-2 text-zinc-400">Visibility</td>
+    <td className="py-2 text-right">{visibility}</td>
+  </tr>
+  <tr>
+    <td className="py-2 text-zinc-400">Endowment</td>
+    <td className="py-2 text-right">
+      {lockedEndowment
+        ? `$${lockedEndowment.usd.toFixed(2)} · ${lockedEndowment.eth.toFixed(6)} ETH`
+        : "None"}
+    </td>
+  </tr>
+  <tr>
+    <td className="py-2 text-zinc-400">Endowment Rate</td>
+    <td className="py-2 text-right">
+      {lockedEndowment ? `$${lockedEndowment.usdPerEth.toFixed(2)} / ETH` : "—"}
+    </td>
+  </tr>
+  <tr>
+    <td className="py-2 text-zinc-400">Status</td>
+    <td className="py-2 text-right">Minted (demo)</td>
+  </tr>
+</tbody>
+
                       </table>
 
                       <div className="mt-6 flex gap-2">
@@ -801,13 +945,14 @@ export default function App() {
 
                     {/* Right Column: Manifest + Archive Contents */}
                     <div className="space-y-6">
-                      <div className="p-6 rounded-2xl border border-white/10 bg-white/5">
+                      <div className="p-6 rounded-2xl border border-white/10 bg-white/5 min-w-0">
                         <h3 className="font-semibold mb-2">Vault Manifest</h3>
                         <div className="text-xs text-zinc-400 mb-2">Visibility: {visibility}</div>
-                        <div className="rounded-2xl border border-white/10 bg-black/30 p-4 whitespace-pre-wrap text-sm min-h-[8rem]">{manifest || "(No manifest provided)"}</div>
+                        <div className="rounded-2xl border border-white/10 bg-black/30 p-4 whitespace-pre-wrap break-words text-sm min-h-[8rem] max-w-full">{manifest || "(No manifest provided)"}</div>
+
                       </div>
 
-                      <div className="p-6 rounded-2xl border border-white/10 bg-white/5">
+                      <div className="p-6 rounded-2xl border border-white/10 bg-white/5 min-w-0">
                         <h3 className="font-semibold mb-2">Archive Contents (first 200)</h3>
                         <div className="text-xs text-zinc-400 mb-2">Preserving folder paths where available</div>
                         <div className="rounded-2xl border border-white/10 max-h-80 overflow-auto">
