@@ -8,7 +8,10 @@
     "paths": { "@/*": ["src/*"] },
     "moduleResolution": "Bundler",
     "strict": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true
   },
+  
   "include": ["src", "vite-env.d.ts"]
 }
