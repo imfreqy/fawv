@@ -1,3 +1,4 @@
+// scripts/deploy.js
 import hre from "hardhat";
 
 async function main() {

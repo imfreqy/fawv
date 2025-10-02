@@ -2,13 +2,6 @@ import React, { useMemo, useRef, useState } from "react";
 import Logo from "./components/brand/Logo";
 import { mintOrRecord, etherscanTxUrl, shortAddr } from "./lib/vault-actions";
 
-const explorerBase =
-  import.meta.env.VITE_EXPLORER_BASE || "https://sepolia.etherscan.io";
-
-const short = (s?: string | null, head = 10, tail = 6) =>
-  s ? `${s.slice(0, head)}…${s.slice(-tail)}` : "—";
-
-
 // ---------------------- API & Wallet Helpers ----------------------
 const api = (p: string) => `/api${p.startsWith("/") ? p : `/${p}`}`;
 
@@ -68,7 +61,6 @@ type MintResult = {
   txHash?: string;
   tokenId?: string;
   tokenURI?: string;
-  token?: string;
   contract?: string;
   contractAddress?: string;
   manifestKey?: string;   // server may return these
@@ -83,54 +75,29 @@ function MintStatus({
   mintResult: MintResult;
 }) {
   if (step === "uploading") return <div className="mt-2 text-sm">Uploading & minting…</div>;
-if (step !== "done" || !mintResult) return null;
-
-return (
-  <section className="mt-3 text-sm">
-    <div className="font-semibold">Minted!</div>
-    <div className="mt-1 space-y-1">
-      {mintResult.token && (
-        <div>Token: <span className="font-mono break-all">{mintResult.token}</span></div>
-      )}
-      {mintResult.tokenId && (
-        <div>Token ID: <span className="font-mono break-all">{mintResult.tokenId}</span></div>
-      )}
-      {(mintResult.contractAddress || import.meta.env.VITE_CONTRACT_ADDRESS) && (
-        <div>
-          Contract:{" "}
-          <a
-            className="underline"
-            href={`https://sepolia.etherscan.io/address/${mintResult.contractAddress ?? import.meta.env.VITE_CONTRACT_ADDRESS}`}
-            target="_blank"
-            rel="noreferrer"
-          >
-            {(mintResult.contractAddress ?? import.meta.env.VITE_CONTRACT_ADDRESS)!.slice(0, 10)}…{(mintResult.contractAddress ?? import.meta.env.VITE_CONTRACT_ADDRESS)!.slice(-6)}
-          </a>
-        </div>
-      )}
-      {mintResult.txHash && (
-        <div>
-          Tx:{" "}
-          <a
-            className="underline"
-            title={mintResult.txHash}
-            href={etherscanTxUrl(mintResult.txHash)}
-            target="_blank"
-            rel="noreferrer"
-          >
-            {shortAddr(mintResult.txHash, 6)}
-          </a>
-        </div>
-      )}
+  if (step !== "done" || !mintResult) return null;
+  return (
+    <section className="mt-3 space-y-1 text-sm">
+      <div className="font-semibold">Minted!</div>
+      {mintResult.txHash && (<div>txHash: <a className="underline" title={mintResult.txHash} href={etherscanTxUrl(mintResult.txHash)} target="_blank" rel="noreferrer">{shortAddr(mintResult.txHash, 6)}</a></div>)}
+      {mintResult.tokenId && <div>tokenId: <span className="font-mono break-all">{mintResult.tokenId}</span></div>}
+{(mintResult.contractAddress || import.meta.env.VITE_CONTRACT_ADDRESS) && (
+  <div>Contract: <a className="underline" href={`https://sepolia.etherscan.io/address/${mintResult.contractAddress ?? import.meta.env.VITE_CONTRACT_ADDRESS}`} target="_blank" rel="noreferrer">
+    {(mintResult.contractAddress ?? import.meta.env.VITE_CONTRACT_ADDRESS)!.slice(0, 10)}…{(mintResult.contractAddress ?? import.meta.env.VITE_CONTRACT_ADDRESS)!.slice(-6)}
+  </a></div>
+)}
+{(mintResult.contractAddress || import.meta.env.VITE_CONTRACT_ADDRESS) && (
+  <div>Contract: <a className="underline" href={`https://sepolia.etherscan.io/address/${mintResult.contractAddress ?? import.meta.env.VITE_CONTRACT_ADDRESS}`} target="_blank" rel="noreferrer">
+    {(mintResult.contractAddress ?? import.meta.env.VITE_CONTRACT_ADDRESS)!.slice(0, 10)}…{(mintResult.contractAddress ?? import.meta.env.VITE_CONTRACT_ADDRESS)!.slice(-6)}
+  </a></div>
+)}
       {mintResult.tokenURI && (
         <div className="truncate" title={mintResult.tokenURI}>
           tokenURI: {mintResult.tokenURI}
         </div>
       )}
-    </div>
-  </section>
-);
-
+    </section>
+  );
 }
 
 interface DemoFile {
@@ -474,96 +441,53 @@ export default function App() {
     return [];
   }
 
- async function finalizeAndMint(s3Key: string, manifestKey?: string) {
-  await ensureSepolia();
-  const to = await getToAddress();
+  async function finalizeAndMint(s3Key: string, manifestKey?: string) {
+    await ensureSepolia();
+    const to = await getToAddress();
 
-  // build the same payload you had before
-  const payload = {
-    s3Key,
-    to,
-    vaultName,
-    product,
-    escrowYears,
-    visibility,
-    archiveHash,
-    manifestText,
-    endowment: lockedEndowment ? {
-      s3Key,
-      usd: lockedEndowment.usd,
-      eth: lockedEndowment.eth,
-      usdPerEth: lockedEndowment.usdPerEth,
-    } : null,
-
-    // server-required bits
-    minterAddress: to,
-    manifestKeyClient: manifestKey || null,
-    sessionId,
-
-    // Optional sha256 hint if archiveHash starts with "sha256:"
-    sha256: archiveHash?.startsWith("sha256:") ? archiveHash.slice(7) : undefined,
-
-    // Public token metadata to publish as token-metadata.json
-    publicMetadata: {
-      name: `FAWV Vault — ${vaultName || sessionId}`,
-      description: "Vaulted asset with attached endowment. See external_url for the private vault manifest.",
-      image: null,
-      external_url: `${window.location.origin}/vault/${sessionId}`,
-      attributes: [
-        { trait_type: "Product", value: product || "" },
-        { trait_type: "Escrow Years", value: product === "Permanence+" ? escrowYears : undefined },
-        { trait_type: "Total Files", value: files.length },
-        { trait_type: "Total Size", value: formatBytes(files.reduce((s, f) => s + (f.file?.size || 0), 0)) },
-        { trait_type: "Visibility", value: visibility || "" },
-        { trait_type: "Archive Hash (SHA-256)", value: archiveHash || "(none)" },
-        ...(lockedEndowment ? [
-          { trait_type: "Endowment (USD)", value: Number(lockedEndowment.usd.toFixed(2)) },
-          { trait_type: "Endowment (ETH at time)", value: Number(lockedEndowment.eth.toFixed(6)) },
-          { trait_type: "Endowment Rate (USD/ETH)", value: Number(lockedEndowment.usdPerEth.toFixed(2)) },
-        ] : []),
-      ],
-    },
-  };
-
-  const mintRes = await fetch(api("/hash-and-mint"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!mintRes.ok) {
-    throw new Error(`hash-and-mint failed: ${mintRes.status} ${await mintRes.text()}`);
+    const res = await fetch(api("/hash-and-mint"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        s3Key,                // first content key (archive seed)
+        to,
+        vaultName,
+        product,
+        escrowYears,
+        visibility,
+        archiveHash,
+        manifestText, // keep it simple: send text again
+        endowment: lockedEndowment ? { usd: lockedEndowment.usd, eth: lockedEndowment.eth, usdPerEth: lockedEndowment.usdPerEth } : null,
+        manifestKeyClient: manifestKey || null, // let server know which key we used for manifest.json
+        sessionId,
+      }),
+    });
+    if (!res.ok) throw new Error(`hash-and-mint failed: ${res.status} ${await res.text()}`);
+    return res.json(); // { ok, txHash, tokenId, tokenURI, contract?, contractAddress?, manifestKey?, manifestRef? ... }
   }
 
-  const data = await mintRes.json(); // { ok, txHash, tokenId, tokenURI, contractAddress, ... }
-
-  // If tokenId not ready but we have txHash, poll /api/tx-status for a short window
-  if (!data.tokenId && data.txHash) {
-    const deadline = Date.now() + 60_000; // up to 60s
-    const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-
-    while (Date.now() < deadline) {
-      await sleep(2500);
-      try {
-        const rs = await fetch(api(`/tx-status?tx=${encodeURIComponent(data.txHash)}`));
-        if (!rs.ok) continue;
-        const st = await rs.json();
-        if (st?.ok && st.status === "confirmed" && st.tokenId) {
-          data.tokenId = String(st.tokenId);
-          if (st.contractAddress) data.contractAddress = st.contractAddress;
-          break;
-        }
-      } catch {
-        // ignore transient errors and continue polling
+  async function forcePatchManifest(manifestKey?: string | null, manifestRef?: string | null) {
+    // Final safety: ask the server to rewrite manifest.json with our extra.manifestText
+    if (!manifestKey && !manifestRef) return;
+    try {
+      const res = await fetch(api("/manifest/force-extra"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          manifestKey: manifestKey || null,
+          manifestRef: manifestRef || null,
+          extra: { manifestText }
+        }),
+      });
+      if (!res.ok) {
+        const t = await res.text().catch(() => "");
+        console.warn("force-extra failed:", res.status, t);
       }
+    } catch (e) {
+      console.warn("force-extra error:", e);
     }
   }
-
-  return data;
-}
-
-
-
-
 
 
   // Build the manifest JSON file contents (includes manifestText in extra)
@@ -700,7 +624,7 @@ export default function App() {
           console.warn("verify-upload non-200:", await verifyRes.text());
         } else {
           const v = await verifyRes.json();
-          if (!v.exists) { console.warn(`verify-upload: object not found yet (continuing): ${firstUploaded.key}`); }
+          if (!v.exists) throw new Error(`Upload verify failed: ${firstUploaded.key} not found`);
         }
       } catch (e) {
         console.warn("verify-upload skipped/failed:", e);
@@ -711,7 +635,11 @@ export default function App() {
       // Mint after successful uploads
   const mintRes = await finalizeAndMint(firstUploaded.key, uploadedManifestKey);
 
-
+// Final pass: force rewrite manifest.json with extra.manifestText (server-side merge)
+await forcePatchManifest(
+  mintRes?.manifestKey ?? uploadedManifestKey ?? null,
+  mintRes?.manifestRef ?? null
+);
 
       // capture manifest path(s) if server responds with them
       if (mintRes?.manifestKey || mintRes?.manifestRef) {
@@ -738,7 +666,6 @@ export default function App() {
         contract: string;
         tokenId: string;
         owner: string;
-        chainId?: string;
         name: string;
         imageDataUrl: string;
         tokenUriJson: string;
@@ -791,19 +718,21 @@ export default function App() {
     let name = `${vaultName || "Vault"} — FAWV Vault`;
     let imageDataUrl = "";
     let tokenUriJson = "";
-    // --- get chainId (decimal) with fallbacks ---
-    let chainId = import.meta.env.VITE_CHAIN_ID || "11155111"; // Sepolia default
-    try {
-  const hex = await (window as any)?.ethereum?.request?.({ method: "eth_chainId" });
-  if (hex) chainId = String(parseInt(String(hex), 16));
-    } catch {
-  // ignore; keep fallback
-}
 
     if (result?.tokenURI) {
       try {
-// Option A: removed force-extra post-mint patch.
-} catch {
+        const r = await fetch(result.tokenURI, { mode: "cors" });
+        if (r.ok) {
+          const j = await r.json();
+          name = j?.name || name;
+          tokenUriJson = JSON.stringify(j, null, 2);
+          if (typeof j?.image === "string" && j.image.startsWith("data:image")) {
+            imageDataUrl = j.image;
+          } else if (typeof j?.image_data === "string") {
+            imageDataUrl = `data:image/svg+xml;base64,${btoa(j.image_data)}`;
+          }
+        }
+      } catch {
         // fall back
       }
     }
@@ -819,7 +748,6 @@ export default function App() {
       contract: contractAddr,
       tokenId: tokenId || "(unavailable)",
       owner,
-      chainId,
       name,
       imageDataUrl,
       tokenUriJson,
@@ -851,8 +779,11 @@ export default function App() {
       setFlowStatus("idle");
       setStep("vault");
     } catch (err) {
-// Option A: removed force-extra post-mint patch.
-} finally {
+      console.error("Submit & Mint failed:", err);
+      setFlowStatus("error");
+      alert((err as Error).message);
+      setStep("manifest");
+    } finally {
       inFlightRef.current = false;
     }
   };
@@ -883,20 +814,6 @@ export default function App() {
     dirname(pickArchiveKey());
 
   // ---------------------- Render ----------------------
-
-// Build CAIP-19 compliant token string
-const DEFAULT_CHAIN_ID = "11155111"; // Sepolia fallback
-const chainId =
-  tokenData?.chainId ||
-  import.meta.env.VITE_CHAIN_ID ||      // Vite projects
-  DEFAULT_CHAIN_ID;
-
-const contractLc = (tokenData?.contract ?? "").toLowerCase();
-const tokenId = tokenData?.tokenId ?? "";
-const caip19 = contractLc && tokenId
-  ? `eip155:${chainId}/erc721:${contractLc}/${tokenId}`
-  : "";
-
   return (
     <div className="min-h-screen bg-gradient-to-b from-sky-950 via-teal-950 to-emerald-950 text-zinc-100">
       <header className="sticky top-0 z-10 backdrop-blur supports-[backdrop-filter]:bg-black/40 bg-black/60 border-b border-white/10">
@@ -1394,70 +1311,23 @@ const caip19 = contractLc && tokenId
                         <button onClick={resetFlow} className="px-3 py-2 rounded-2xl border border-white/10">Build Another Vault</button>
                       </div>
 
-                     {mintResult && (
-  <div className="mt-4 text-sm text-zinc-300 space-y-1">
-    {/* Show your content hash too, if the API returns it */}
-    {mintResult.token && (
-      <div>
-        Token: <span className="font-mono break-all">{mintResult.token}</span>
-      </div>
-    )}
-
-    {mintResult.tokenId && (
-      <div>
-        Token ID: <span className="font-mono break-all">{mintResult.tokenId}</span>
-      </div>
-    )}
-
-    {(mintResult.contractAddress || import.meta.env.VITE_CONTRACT_ADDRESS) && (
-      <div>
-        Contract:{" "}
-        <a
-          className="underline"
-          href={`${explorerBase}/address/${
-            mintResult.contractAddress ?? import.meta.env.VITE_CONTRACT_ADDRESS
-          }`}
-          target="_blank"
-          rel="noreferrer"
-        >
-          {short(mintResult.contractAddress ?? import.meta.env.VITE_CONTRACT_ADDRESS)}
-        </a>
-      </div>
-    )}
-
-    {mintResult.txHash && (
-      <div className="flex items-center gap-2">
-        <span>TxHash:</span>
-        <a
-          className="underline font-mono break-all"
-          title={mintResult.txHash}
-          href={`${explorerBase}/tx/${mintResult.txHash}`}
-          target="_blank"
-          rel="noreferrer"
-        >
-          {mintResult.txHash}
-        </a>
-        <button
-          className="text-xs underline"
-          onClick={() => navigator.clipboard?.writeText(mintResult.txHash)}
-        >
-          copy
-        </button>
-      </div>
-    )}
-
-    {mintResult.tokenURI && (
-      <div className="truncate" title={mintResult.tokenURI}>
-        tokenURI:{" "}
-        <a className="underline" href={mintResult.tokenURI} target="_blank" rel="noreferrer">
-          {mintResult.tokenURI}
-        </a>
-      </div>
-    )}
-  </div>
+                      {mintResult?.txHash && (
+                        <div className="mt-4 text-sm text-zinc-300 space-y-1">
+                          <div>txHash: <span className="font-mono break-all">{mintResult.txHash}</span></div>
+                          {mintResult.tokenId && <div>tokenId: <span className="font-mono break-all">{mintResult.tokenId}</span></div>}
+{(mintResult.contractAddress || import.meta.env.VITE_CONTRACT_ADDRESS) && (
+  <div>Contract: <a className="underline" href={`https://sepolia.etherscan.io/address/${mintResult.contractAddress ?? import.meta.env.VITE_CONTRACT_ADDRESS}`} target="_blank" rel="noreferrer">
+    {(mintResult.contractAddress ?? import.meta.env.VITE_CONTRACT_ADDRESS)!.slice(0, 10)}…{(mintResult.contractAddress ?? import.meta.env.VITE_CONTRACT_ADDRESS)!.slice(-6)}
+  </a></div>
 )}
-
-
+{(mintResult.contractAddress || import.meta.env.VITE_CONTRACT_ADDRESS) && (
+  <div>Contract: <a className="underline" href={`https://sepolia.etherscan.io/address/${mintResult.contractAddress ?? import.meta.env.VITE_CONTRACT_ADDRESS}`} target="_blank" rel="noreferrer">
+    {(mintResult.contractAddress ?? import.meta.env.VITE_CONTRACT_ADDRESS)!.slice(0, 10)}…{(mintResult.contractAddress ?? import.meta.env.VITE_CONTRACT_ADDRESS)!.slice(-6)}
+  </a></div>
+)}
+                          {mintResult.tokenURI && <div>tokenURI: <span className="font-mono break-all">{mintResult.tokenURI}</span></div>}
+                        </div>
+                      )}
                     </div>
 
                     {/* Right Column: Manifest + Archive Contents */}
@@ -1508,7 +1378,6 @@ const caip19 = contractLc && tokenId
       </footer>
 
       {/* Token Modal */}
-      
       {showTokenModal && tokenData && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="w-full max-w-2xl rounded-2xl border border-white/10 bg-zinc-950 overflow-hidden shadow-2xl">
@@ -1541,12 +1410,10 @@ const caip19 = contractLc && tokenId
                       <td className="py-1 text-zinc-400">Token ID</td>
                       <td className="py-1 text-right font-mono break-all max-w-[26ch]">{tokenData.tokenId}</td>
                     </tr>
-                   <tr>
-                      <td className="py-1 text-zinc-400">Chain ID</td>
-                       <td className="py-1 text-right font-mono break-all max-w-[26ch]">
-                       {tokenData.chainId || (import.meta.env.VITE_CHAIN_ID || "11155111")}
-                     </td>
-                  </tr>
+                    <tr>
+                      <td className="py-1 text-zinc-400">Owner</td>
+                      <td className="py-1 text-right font-mono break-all max-w-[26ch]">{tokenData.owner}</td>
+                    </tr>
                   </tbody>
                 </table>
 
@@ -1556,24 +1423,15 @@ const caip19 = contractLc && tokenId
                 </div>
               </div>
             </div>
-           <div className="flex justify-end gap-2">
-             <button
-                  onClick={() => navigator.clipboard?.writeText(caip19)}
-                   disabled={!caip19}
-                   className="px-4 py-2 rounded-2xl bg-cyan-500 hover:bg-cyan-400 text-black font-semibold"
-                   title={caip19 || "Nothing to copy"}
-                    >
-                   Copy Token
+            <div className="p-4 border-t border-white/10 flex items-center justify-end gap-2">
+              <button
+                onClick={() => copy(`${tokenData.contract}:${tokenData.tokenId}`)}
+                className="px-3 py-2 rounded-2xl bg-cyan-500 hover:bg-cyan-400 text-black font-semibold"
+              >
+                Copy &ldquo;contract:tokenId&rdquo;
               </button>
-
-               <button
-                   onClick={() => setShowTokenModal(false)}
-                   className="px-3 py-2 rounded-2xl border border-white/10"
-                    >
-                   Close
-               </button>
+              <button onClick={() => setShowTokenModal(false)} className="px-3 py-2 rounded-2xl border border-white/10">Close</button>
             </div>
-
           </div>
         </div>
       )}

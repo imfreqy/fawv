@@ -2,13 +2,10 @@ import "dotenv/config";
 import "@nomicfoundation/hardhat-ethers";
 import { task } from "hardhat/config";
 
-/** Quick diagnostic: `npx hardhat check-ethers` should print true */
-task("check-ethers", "Verify hre.ethers is available", async (_, hre) => {
-  console.log("hre.ethers?", !!hre.ethers);
-});
-task("show-networks", "Print resolved networks", async (_, hre) => {
-  console.log(hre.config.networks);
-});
+/** Quick diagnostic: npx hardhat check-ethers should print true */ 
+task("check-ethers", "Verify hre.ethers is available", async (_, hre) => { 
+  console.log("hre.ethers?", !!hre.ethers); }); 
+  task("show-networks", "Print resolved networks", async (_, hre) => { console.log(hre.config.networks); });
 /** @type {import('hardhat/config').HardhatUserConfig} */
 export default {
   solidity: "0.8.24",

@@ -175,10 +175,10 @@ router.get("/contract/diagnose", async (_req, res) => {
     if (!code || code === "0x") return res.json({ ok:true, contractAddress, code: "0x", msg:"no code at address" });
 
     const acc = await wallet.getAddress();
-    const probe = new ethers.Contract(contractAddress, MINT_ABI, wallet);
+    const probe = new ethers.Contract(contractAddress, ["function owner() view returns (address)"], wallet);
     let owner = null;
     try { owner = await probe.owner(); } catch (e) {}
-    const ifaceProbe = new ethers.Contract(contractAddress, MINT_ABI, wallet);
+    const ifaceProbe = new ethers.Contract(contractAddress, ["function supportsInterface(bytes4) view returns (bool)"], wallet);
     const supports = {};
     try { supports.ERC165  = await ifaceProbe.supportsInterface("0x01ffc9a7"); } catch (e) {}
     try { supports.ERC721  = await ifaceProbe.supportsInterface("0x80ac58cd"); } catch (e) {}
@@ -227,8 +227,6 @@ router.get("/contract/scan", async (_req, res) => {
       // address + tokenURI
       "mint(address,string)",
       "safeMint(address,string)",
-            "safeMint(address,string,bytes32)",
-            "safeMint(address,bytes32,string)",
       "mintTo(address,string)",
       "mintNFT(address,string)",
       "mintItem(address,string)",
@@ -375,9 +373,7 @@ const MINT_ABI = [
   "function mintURI(address to, string tokenURI) returns (uint256)",
   "function mintWithURI(address to, string tokenURI) returns (uint256)",
 
-    "function safeMint(address to, string tokenURI, bytes32 fileHash) returns (uint256)",
-  "function safeMint(address to, bytes32 fileHash, string tokenURI) returns (uint256)",
-// hash-based
+  // hash-based
   "function mintVault(address to, bytes32 contentHash, string key) returns (uint256)",
   "function mintRecord(address to, bytes32 contentHash, string key) returns (uint256)",
   "function mintWithHash(address to, bytes32 contentHash, string key) returns (uint256)",
@@ -456,9 +452,6 @@ function buildMintCandidates(minterAddress, tokenURI, bytes32Hash, contentKey) {
     tokenURI ? ["mintURI(address,string)",     [minterAddress, tokenURI]] : null,
     tokenURI ? ["mintWithURI(address,string)", [minterAddress, tokenURI]] : null,
 
-    //     // Hybrid: URI + bytes32 content hash
-    (tokenURI && bytes32Hash) ? ["safeMint(address,string,bytes32)", [minterAddress, tokenURI, bytes32Hash]] : null,
-    (tokenURI && bytes32Hash) ? ["safeMint(address,bytes32,string)", [minterAddress, bytes32Hash, tokenURI]] : null,
     // Hash-based
     (bytes32Hash && contentKey) ? ["mintVault(address,bytes32,string)",    [minterAddress, bytes32Hash, contentKey]] : null,
     (bytes32Hash && contentKey) ? ["mintRecord(address,bytes32,string)",   [minterAddress, bytes32Hash, contentKey]] : null,
@@ -553,7 +546,6 @@ router.post("/hash-and-mint", async (req, res) => {
 
     let txHash = null;
     let tokenId = null;
-    let tokenIdSim = null;
     let contractAddress = DEFAULT_CONTRACT || null;
     let chainError = null;
     let mintFnUsed = null;
@@ -572,22 +564,22 @@ router.post("/hash-and-mint", async (req, res) => {
           let diag = { from: null, owner: null, hasMinter: null, paused: null };
           try { diag.from = await wallet.getAddress(); } catch (e) {}
           try {
-            const ownable = new ethers.Contract(contractAddress, MINT_ABI, wallet);
+            const ownable = new ethers.Contract(contractAddress, ["function owner() view returns (address)"], wallet);
             diag.owner = await ownable.owner();
           } catch (e) {}
           try {
-            const access = new ethers.Contract(contractAddress, MINT_ABI, wallet);
+            const access = new ethers.Contract(contractAddress, ["function hasRole(bytes32,address) view returns (bool)"], wallet);
             const MINTER_ROLE = ethers.id("MINTER_ROLE");
             diag.hasMinter = await access.hasRole(MINTER_ROLE, diag.from);
           } catch (e) {}
           try {
-            const pausable = new ethers.Contract(contractAddress, MINT_ABI, wallet);
+            const pausable = new ethers.Contract(contractAddress, ["function paused() view returns (bool)"], wallet);
             diag.paused = await pausable.paused();
           } catch (e) {}
           console.log("[mint] diag", diag);
 
           try {
-            const ifaceProbe = new ethers.Contract(contractAddress, MINT_ABI, wallet);
+            const ifaceProbe = new ethers.Contract(contractAddress, ["function supportsInterface(bytes4) view returns (bool)"], wallet);
             const IID_ERC165         = "0x01ffc9a7";
             const IID_ERC721         = "0x80ac58cd";
             const IID_ERC721Metadata = "0x5b5e139f";
@@ -611,11 +603,11 @@ router.post("/hash-and-mint", async (req, res) => {
             const adminCandidates = buildAdminToggleList(minterAddress);
             for (const [sig, args] of adminCandidates) {
               try {
-                const name = sig.match(/([^(]+)/)[1]; /* unused for calls: prefer full signature */
-                const admin = new ethers.Contract(contractAddress, MINT_ABI, wallet);
-                await admin.getFunction(sig).populateTransaction(...args);
-                try { await admin.getFunction(sig).staticCall(...args); } catch (e) { continue; }
-                const txAdmin = await admin.getFunction(sig)(...args);
+                const name = sig.match(/([^(]+)/)[1];
+                const admin = new ethers.Contract(contractAddress, [ `function ${sig}` ], wallet);
+                await admin.getFunction(name).populateTransaction(...args);
+                try { await admin.getFunction(name).staticCall(...args); } catch (e) { continue; }
+                const txAdmin = await admin.getFunction(name)(...args);
                 console.log("[mint][admin]", sig, "tx:", txAdmin.hash);
               } catch (e) { /* try next */ }
             }
@@ -624,89 +616,24 @@ router.post("/hash-and-mint", async (req, res) => {
           // Mint attempts
           const candidateList = buildMintCandidates(minterAddress, tokenURI, bytes32Hash, contentKey);
           outer: for (const [sig, args] of candidateList) {
-            const name = sig.match(/([^(]+)/)[1]; /* unused for calls: prefer full signature */
-            const c = new ethers.Contract(contractAddress, MINT_ABI, wallet);
-                  let tokenIdSim = null;
-try { await c.getFunction(sig).populateTransaction(...args); } catch (e) { continue; }
+            const name = sig.match(/([^(]+)/)[1];
+            const c = new ethers.Contract(contractAddress, [ `function ${sig}`, "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)" ], wallet);
+            try { await c.getFunction(name).populateTransaction(...args); } catch (e) { continue; }
             for (const val of valuesToTry) {
               const overrides = val > 0n ? { value: val } : {};
-              try { tokenIdSim = await c.getFunction(sig).staticCall(...args, overrides); }
+              try { await c.getFunction(name).staticCall(...args, overrides); }
               catch (staticErr) {
-            try { tokenIdSim = await c.getFunction(sig).staticCall(...args, overrides); } catch {}
-
                 console.log("[mint] static revert", `${sig} value=${val.toString()}`, "-", staticErr?.shortMessage || staticErr?.reason || staticErr?.code || String(staticErr));
                 continue;
               }
               console.log("[mint] using", sig, "value=", val.toString());
-              const sent = await c.getFunction(sig)(...args, overrides);
+              const sent = await c.getFunction(name)(...args, overrides);
               txHash = sent.hash;
               mintFnUsed = sig;
               console.log("[mint] tx", sent.hash);
 
               try {
                 const rc = await provider.waitForTransaction(sent.hash, 0, 20_000);
-          // --- Robust tokenId extraction start ---
-          let receipt = rc;
-          try {
-            const r2 = await wallet.provider.getTransactionReceipt(sent.hash);
-            if (r2 && Array.isArray(r2.logs)) receipt = r2;
-          } catch {}
-
-          try {
-            const evSig = "Transfer(address,address,uint256)";
-            const transferTopic0 = ethers.id(evSig);
-            const I = new ethers.Interface([`event ${evSig}`]);
-            if (receipt && receipt.logs) {
-              for (const lg of receipt.logs) {
-                try {
-                  if ((lg.topics?.[0] || "").toLowerCase() !== transferTopic0.toLowerCase()) continue;
-                  const parsed = I.parseLog(lg);
-                  const tid = (parsed?.args?.tokenId ?? parsed?.args?.[2]);
-                  if (tid != null) { tokenId = tid.toString(); break; }
-                } catch {}
-              }
-            }
-          } catch {}
-
-          if (!tokenId && receipt) {
-            try {
-              const evSig = "Transfer(address,address,uint256)";
-              const transferTopic0 = ethers.id(evSig);
-              const zeroTopic = ethers.zeroPadValue("0x0000000000000000000000000000000000000000", 32);
-              const toTopic   = ethers.zeroPadValue(minterAddress, 32);
-              const fromBlock = Math.max(0, receipt.blockNumber - 1);
-              const toBlock   = receipt.blockNumber + 1;
-              const mlogs = await wallet.provider.getLogs({
-                fromBlock, toBlock,
-                topics: [transferTopic0, zeroTopic, toTopic]
-              });
-              const I = new ethers.Interface([`event ${evSig}`]);
-              for (const lg of mlogs) {
-                try {
-                  const parsed = I.parseLog(lg);
-                  const tid = (parsed?.args?.tokenId ?? parsed?.args?.[2]);
-                  if (tid != null) { tokenId = tid.toString(); break; }
-                } catch {}
-              }
-            } catch {}
-          }
-
-          if (!tokenId) {
-            try {
-              const enumABI = [
-                "function balanceOf(address) view returns (uint256)",
-                "function tokenOfOwnerByIndex(address, uint256) view returns (uint256)"
-              ];
-              const ec = new ethers.Contract(contractAddress, enumABI, wallet);
-              const bal = await ec.balanceOf(minterAddress);
-              if (bal && bal > 0n) {
-                const last = await ec.tokenOfOwnerByIndex(minterAddress, bal - 1n);
-                if (last != null) tokenId = last.toString();
-              }
-            } catch {}
-          }
-          if (!tokenId && tokenIdSim != null) { try { tokenId = tokenIdSim.toString?.() || String(tokenIdSim); } catch { tokenId = String(tokenIdSim); } }
-          // --- Robust tokenId extraction end ---
                 if (rc) {
                   const T721  = ethers.id("Transfer(address,address,uint256)");
                   for (const log of rc.logs || []) {
@@ -714,68 +641,6 @@ try { await c.getFunction(sig).populateTransaction(...args); } catch (e) { conti
                       try { tokenId = ethers.toBigInt(log.topics[3]).toString(); break; } catch (e) {}
                     }
                   }
-
-                // --- Debug dump of receipt logs (addresses + topics) ---
-                try {
-                  const tlen = (rc && rc.logs) ? rc.logs.length : 0;
-                  console.log("[mint][rc.logs] count=", tlen);
-                  if (rc && rc.logs) {
-                    for (const lg of rc.logs) {
-                      console.log("[mint][log] addr=", lg.address, "topics0=", lg.topics?.[0], "len=", (lg.topics||[]).length);
-                    }
-                  }
-                } catch {}
-
-                // Fallback A: Interface parse for Transfer over rc.logs
-                try {
-                  if (!tokenId && rc && rc.logs) {
-                    const I = new ethers.Interface([
-                      "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)"
-                    ]);
-                    for (const lg of rc.logs) {
-                      try {
-                        const parsed = I.parseLog(lg);
-                        if (parsed?.name === "Transfer") {
-                          tokenId = (parsed.args?.tokenId ?? parsed.args?.[2])?.toString?.() || tokenId;
-                          if (tokenId) break;
-                        }
-                      } catch {}
-                    }
-                  }
-                } catch {}
-
-                // Fallback B: query logs around the tx block without address filter, then filter in-code
-                if (!tokenId && rc) {
-                  try {
-                    const fromBlock = Math.max(0, rc.blockNumber - 2);
-                    const toBlock   = rc.blockNumber + 2;
-                    const transferTopic = ethers.id("Transfer(address,address,uint256)");
-                    const logs = await provider.getLogs({
-                      fromBlock, toBlock,
-                      topics: [transferTopic]
-                    });
-                    const I = new ethers.Interface([
-                      "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)"
-                    ]);
-                    for (const lg of logs) {
-                      if (lg.address?.toLowerCase?.() !== String(contractAddress).toLowerCase()) continue;
-                      try {
-                        const parsed = I.parseLog(lg);
-                        if (parsed?.name !== "Transfer") continue;
-                        // prefer mint (from zero) or to == minterAddress
-                        const zero = "0x0000000000000000000000000000000000000000";
-                        const fromAddr = (parsed.args?.from || parsed.args?.[0] || "").toLowerCase?.();
-                        const toAddr   = (parsed.args?.to   || parsed.args?.[1] || "").toLowerCase?.();
-                        if (fromAddr && fromAddr !== zero && minterAddress && toAddr !== String(minterAddress).toLowerCase()) continue;
-                        tokenId = (parsed.args?.tokenId ?? parsed.args?.[2])?.toString?.();
-                        if (tokenId) break;
-                      } catch {}
-                    }
-                  } catch (e) {
-                    console.warn("[mint][fallbackB] getLogs error:", e?.message || e);
-                  }
-                }
-
                 }
               } catch (e) {}
               break outer;
@@ -823,8 +688,6 @@ try { await c.getFunction(sig).populateTransaction(...args); } catch (e) { conti
       ServerSideEncryption: "AES256"
     }));
 
-    console.log("[mint] token summary", { tokenId, token: bytes32Hash });
-    console.log("[mint] tokenId after extraction:", tokenId);
     console.log("[hash-and-mint] done", { sessionId, manifestKeyClient, tokenMetaKey, wroteMeta: !!tokenURI, txHash, tokenId, chainError });
 
     return res.json({
@@ -889,18 +752,16 @@ router.post("/mint/token", async (req, res) => {
 
     const cand = buildMintCandidates(to, tokenURI, bytes32Hash, contentKey);
     for (const [sig, args] of cand) {
-      const name = sig.match(/([^(]+)/)[1]; /* unused for calls: prefer full signature */
-      try { await contract.getFunction(sig).populateTransaction(...args); } catch (e) { continue; }
+      const name = sig.match(/([^(]+)/)[1];
+      try { await contract.getFunction(name).populateTransaction(...args); } catch (e) { continue; }
 
       for (const v of vals) {
         const overrides = v > 0n ? { value: v } : {};
-        try { await contract.getFunction(sig).staticCall(...args, overrides); }
-        catch (staticErr) {
-            try { tokenIdSim = await c.getFunction(sig).staticCall(...args, overrides); } catch {}
- continue; }
+        try { await contract.getFunction(name).staticCall(...args, overrides); }
+        catch (staticErr) { continue; }
 
-        used = sig; usedVal = v;
-        tx = await contract.getFunction(sig)(...args, overrides);
+        used = name; usedVal = v;
+        tx = await contract.getFunction(name)(...args, overrides);
         break;
       }
       if (tx) break;
@@ -965,64 +826,4 @@ router.get("/tx-status", async (req, res) => {
   }
 });
 
-
-// ------------------------------ Specific safeMint(address,string,bytes32) endpoint ------------------------------
-router.post("/mint/safe", async (req, res) => {
-  try {
-    const { to, tokenUri, fileHashHex, contractAddress } = req.body || {};
-    if (!to || !tokenUri || !fileHashHex) {
-      return res.status(400).json({ ok:false, error:"bad_request", message:"to, tokenUri, fileHashHex are required" });
-    }
-    const addr = contractAddress || DEFAULT_CONTRACT;
-    if (!addr) return res.status(400).json({ ok:false, error:"missing_contract_address" });
-
-    const wallet = getWallet();
-    if (!wallet) return res.status(500).json({ ok:false, error:"missing_rpc_or_pk" });
-
-    const provider = wallet.provider;
-    const code = await provider.getCode(addr);
-    if (!code || code === "0x") return res.status(400).json({ ok:false, error:"no_code_at_address" });
-
-    // ABI is limited to just the function we want + Transfer event
-    const SAFE_ABI = [
-      "function safeMint(address to, string tokenURI, bytes32 fileHash) returns (uint256)",
-      "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)"
-    ];
-    const contract = new ethers.Contract(addr, SAFE_ABI, wallet);
-
-    // Normalize to bytes32 (0x + 64 hex chars, left-padded)
-    let h = String(fileHashHex).trim();
-    if (!h.startsWith("0x")) h = "0x" + h;
-    const fileHash32 = ethers.zeroPadValue(h, 32);
-
-    // Preflight: will throw if function is missing or would revert immediately
-    try { await contract.getFunction("safeMint").staticCall(to, tokenUri, fileHash32); }
-    catch (e) {
-      return res.status(400).json({ ok:false, error:"preflight_failed", message: e?.shortMessage || e?.reason || e?.message || String(e) });
-    }
-
-    const tx = await contract.safeMint(to, tokenUri, fileHash32);
-    const rc = await wallet.provider.waitForTransaction(tx.hash, 0, 12000);
-
-    let tokenId = null;
-    try {
-      const iface = new ethers.Interface(SAFE_ABI);
-      if (rc && rc.logs) {
-        for (const log of rc.logs) {
-          try {
-            const parsed = iface.parseLog(log);
-            if (parsed?.name === "Transfer") {
-              tokenId = (parsed.args?.tokenId ?? parsed.args?.[2])?.toString?.() || tokenId;
-              break;
-            }
-          } catch {}
-        }
-      }
-    } catch {}
-
-    return res.json({ ok:true, contractAddress: addr, txHash: tx.hash, tokenId });
-  } catch (err) {
-    return res.status(500).json({ ok:false, error:"mint_safe_failed", message: err?.shortMessage || err?.reason || err?.message || String(err) });
-  }
-});
 export default router;

@@ -1,13 +1,6 @@
 import React, { useMemo, useRef, useState } from "react";
 import Logo from "./components/brand/Logo";
-import { mintOrRecord, etherscanTxUrl, shortAddr } from "./lib/vault-actions";
-
-const explorerBase =
-  import.meta.env.VITE_EXPLORER_BASE || "https://sepolia.etherscan.io";
-
-const short = (s?: string | null, head = 10, tail = 6) =>
-  s ? `${s.slice(0, head)}…${s.slice(-tail)}` : "—";
-
+import { mintOrRecord, etherscanTxUrl, shortAddr } from "@/lib/vault-actions";
 
 // ---------------------- API & Wallet Helpers ----------------------
 const api = (p: string) => `/api${p.startsWith("/") ? p : `/${p}`}`;
@@ -68,7 +61,6 @@ type MintResult = {
   txHash?: string;
   tokenId?: string;
   tokenURI?: string;
-  token?: string;
   contract?: string;
   contractAddress?: string;
   manifestKey?: string;   // server may return these
@@ -82,55 +74,20 @@ function MintStatus({
   step: "idle" | "uploading" | "done" | "error";
   mintResult: MintResult;
 }) {
-  if (step === "uploading") return <div className="mt-2 text-sm">Uploading & minting…</div>;
-if (step !== "done" || !mintResult) return null;
-
-return (
-  <section className="mt-3 text-sm">
-    <div className="font-semibold">Minted!</div>
-    <div className="mt-1 space-y-1">
-      {mintResult.token && (
-        <div>Token: <span className="font-mono break-all">{mintResult.token}</span></div>
-      )}
-      {mintResult.tokenId && (
-        <div>Token ID: <span className="font-mono break-all">{mintResult.tokenId}</span></div>
-      )}
-      {(mintResult.contractAddress || import.meta.env.VITE_CONTRACT_ADDRESS) && (
-        <div>
-          Contract:{" "}
-          <a
-            className="underline"
-            href={`https://sepolia.etherscan.io/address/${mintResult.contractAddress ?? import.meta.env.VITE_CONTRACT_ADDRESS}`}
-            target="_blank"
-            rel="noreferrer"
-          >
-            {(mintResult.contractAddress ?? import.meta.env.VITE_CONTRACT_ADDRESS)!.slice(0, 10)}…{(mintResult.contractAddress ?? import.meta.env.VITE_CONTRACT_ADDRESS)!.slice(-6)}
-          </a>
-        </div>
-      )}
-      {mintResult.txHash && (
-        <div>
-          Tx:{" "}
-          <a
-            className="underline"
-            title={mintResult.txHash}
-            href={etherscanTxUrl(mintResult.txHash)}
-            target="_blank"
-            rel="noreferrer"
-          >
-            {shortAddr(mintResult.txHash, 6)}
-          </a>
-        </div>
-      )}
+  if (step === "uploading") return <div className="mt-2 text-sm">Uploading & mintingâ€¦</div>;
+  if (step !== "done" || !mintResult) return null;
+  return (
+    <section className="mt-3 space-y-1 text-sm">
+      <div className="font-semibold">Minted!</div>
+      {mintResult.txHash && <div>txHash: <span className="font-mono break-all">{mintResult.txHash}</span></div>}
+      {mintResult.tokenId && <div>tokenId: <span className="font-mono break-all">{mintResult.tokenId}</span></div>}
       {mintResult.tokenURI && (
         <div className="truncate" title={mintResult.tokenURI}>
           tokenURI: {mintResult.tokenURI}
         </div>
       )}
-    </div>
-  </section>
-);
-
+    </section>
+  );
 }
 
 interface DemoFile {
@@ -225,7 +182,7 @@ function calculatePrice(
     return {
       gb, tokenization, storage,
       subtotal: tokenization + storage,
-      notes: `Requires annual Evidence of Active Stewardship (EAS) — $${PRICING.permanence.annualEAS.toFixed(2)}/yr`,
+      notes: `Requires annual Evidence of Active Stewardship (EAS) â€” $${PRICING.permanence.annualEAS.toFixed(2)}/yr`,
     };
   }
   if (product === "Permanence+") {
@@ -474,96 +431,53 @@ export default function App() {
     return [];
   }
 
- async function finalizeAndMint(s3Key: string, manifestKey?: string) {
-  await ensureSepolia();
-  const to = await getToAddress();
+  async function finalizeAndMint(s3Key: string, manifestKey?: string) {
+    await ensureSepolia();
+    const to = await getToAddress();
 
-  // build the same payload you had before
-  const payload = {
-    s3Key,
-    to,
-    vaultName,
-    product,
-    escrowYears,
-    visibility,
-    archiveHash,
-    manifestText,
-    endowment: lockedEndowment ? {
-      s3Key,
-      usd: lockedEndowment.usd,
-      eth: lockedEndowment.eth,
-      usdPerEth: lockedEndowment.usdPerEth,
-    } : null,
-
-    // server-required bits
-    minterAddress: to,
-    manifestKeyClient: manifestKey || null,
-    sessionId,
-
-    // Optional sha256 hint if archiveHash starts with "sha256:"
-    sha256: archiveHash?.startsWith("sha256:") ? archiveHash.slice(7) : undefined,
-
-    // Public token metadata to publish as token-metadata.json
-    publicMetadata: {
-      name: `FAWV Vault — ${vaultName || sessionId}`,
-      description: "Vaulted asset with attached endowment. See external_url for the private vault manifest.",
-      image: null,
-      external_url: `${window.location.origin}/vault/${sessionId}`,
-      attributes: [
-        { trait_type: "Product", value: product || "" },
-        { trait_type: "Escrow Years", value: product === "Permanence+" ? escrowYears : undefined },
-        { trait_type: "Total Files", value: files.length },
-        { trait_type: "Total Size", value: formatBytes(files.reduce((s, f) => s + (f.file?.size || 0), 0)) },
-        { trait_type: "Visibility", value: visibility || "" },
-        { trait_type: "Archive Hash (SHA-256)", value: archiveHash || "(none)" },
-        ...(lockedEndowment ? [
-          { trait_type: "Endowment (USD)", value: Number(lockedEndowment.usd.toFixed(2)) },
-          { trait_type: "Endowment (ETH at time)", value: Number(lockedEndowment.eth.toFixed(6)) },
-          { trait_type: "Endowment Rate (USD/ETH)", value: Number(lockedEndowment.usdPerEth.toFixed(2)) },
-        ] : []),
-      ],
-    },
-  };
-
-  const mintRes = await fetch(api("/hash-and-mint"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!mintRes.ok) {
-    throw new Error(`hash-and-mint failed: ${mintRes.status} ${await mintRes.text()}`);
+    const res = await fetch(api("/hash-and-mint"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        s3Key,                // first content key (archive seed)
+        to,
+        vaultName,
+        product,
+        escrowYears,
+        visibility,
+        archiveHash,
+        manifestText, // keep it simple: send text again
+        endowment: lockedEndowment ? { usd: lockedEndowment.usd, eth: lockedEndowment.eth, usdPerEth: lockedEndowment.usdPerEth } : null,
+        manifestKeyClient: manifestKey || null, // let server know which key we used for manifest.json
+        sessionId,
+      }),
+    });
+    if (!res.ok) throw new Error(`hash-and-mint failed: ${res.status} ${await res.text()}`);
+    return res.json(); // { ok, txHash, tokenId, tokenURI, contract?, contractAddress?, manifestKey?, manifestRef? ... }
   }
 
-  const data = await mintRes.json(); // { ok, txHash, tokenId, tokenURI, contractAddress, ... }
-
-  // If tokenId not ready but we have txHash, poll /api/tx-status for a short window
-  if (!data.tokenId && data.txHash) {
-    const deadline = Date.now() + 60_000; // up to 60s
-    const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-
-    while (Date.now() < deadline) {
-      await sleep(2500);
-      try {
-        const rs = await fetch(api(`/tx-status?tx=${encodeURIComponent(data.txHash)}`));
-        if (!rs.ok) continue;
-        const st = await rs.json();
-        if (st?.ok && st.status === "confirmed" && st.tokenId) {
-          data.tokenId = String(st.tokenId);
-          if (st.contractAddress) data.contractAddress = st.contractAddress;
-          break;
-        }
-      } catch {
-        // ignore transient errors and continue polling
+  async function forcePatchManifest(manifestKey?: string | null, manifestRef?: string | null) {
+    // Final safety: ask the server to rewrite manifest.json with our extra.manifestText
+    if (!manifestKey && !manifestRef) return;
+    try {
+      const res = await fetch(api("/manifest/force-extra"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          manifestKey: manifestKey || null,
+          manifestRef: manifestRef || null,
+          extra: { manifestText }
+        }),
+      });
+      if (!res.ok) {
+        const t = await res.text().catch(() => "");
+        console.warn("force-extra failed:", res.status, t);
       }
+    } catch (e) {
+      console.warn("force-extra error:", e);
     }
   }
-
-  return data;
-}
-
-
-
-
 
 
   // Build the manifest JSON file contents (includes manifestText in extra)
@@ -592,145 +506,84 @@ export default function App() {
     return new File([json], "manifest.json", { type: "application/json" });
   }
 
-  async function uploadToS3(source: DemoFile[] = files) {
-    if (!source.length) throw new Error("No files selected");
+  async function uploadToS3(_selected: DemoFile[] = files): Promise<MintResult> {
+  const sel = Array.isArray(_selected) && _selected.length ? _selected : files;
+  if (!sel?.length) throw new Error("No files selected.");
 
-    setUploading(true);
-    setUploadPct(0);
+  // 1) Ask server for presigned URLs
+  const filesPayload = sel.map((f: any) => ({
+    name: f.file?.name || f.name,
+    relPath: f.fullPath || f.relPath || f.file?.name || f.name,
+    contentType: f.file?.type || f.type || "application/octet-stream",
+    sha256: f.sha256 || null,
+  }));
 
-    try {
-      // Attach a synthetic manifest.json to the upload plan so it is written to S3
-      const manifestFile = buildManifestJsonFile(source);
-      const manifestRelPath = "manifest.json"; // server will place it under the session/prefix as it does for files
-      const combinedList: DemoFile[] = [
-        ...source,
-        { file: manifestFile, fullPath: manifestRelPath },
-      ];
+  const startRes = await fetch(api("/upload/start"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sessionId, files: filesPayload }),
+  });
+  if (!startRes.ok) throw new Error(`upload/start failed: ${startRes.status} ${await startRes.text()}`);
+  const startJson = await startRes.json();
+  if (!startJson?.ok || !Array.isArray(startJson.items) || startJson.items.length === 0) {
+    throw new Error(`upload/start returned no items`);
+  }
+  const uploadBucket: string | undefined = startJson.bucket;
+  const items: Array<{ objectKey: string; uploadUrl: string; contentType?: string; sse?: string; }> = startJson.items;
 
-      const plan = await getPresignedPlan(sessionId, combinedList, manifestText);
-      const items = normalizePlan(plan, combinedList);
-      if (!items.length) throw new Error("presign returned no items");
+  // 2) PUT each file with matching headers
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const match: any = sel[i];
+    const fileBlob: Blob = match.file || match;
 
-      let done = 0;
-      let firstUploaded: { key: string; sha256?: string } | null = null;
-      let uploadedManifestKey: string | undefined;
-
-      // quick lookup for body by relPath
-      const byRelPath = new Map<string, DemoFile>();
-      for (const df of combinedList) byRelPath.set(df.fullPath, df);
-
-      // recognizer for manifest target regardless of relPath/key shape
-      const looksLikeManifest = (it: PresignItem) => {
-        const rel = it.relPath || "";
-        const k = it.key || it.objectKey || "";
-        return rel.endsWith("/manifest.json") || rel === "manifest.json" ||
-               k.endsWith("/manifest.json") || k === "manifest.json";
-      };
-
-      for (const item of items) {
-        // Ensure we PUT the *manifest file* to the manifest URL
-        let match = byRelPath.get(item.relPath);
-        if (!match && looksLikeManifest(item)) {
-          match = { file: manifestFile, fullPath: manifestRelPath };
-        }
-        if (!match) {
-          // fallback to name-based match
-          const base = (item.relPath || item.key || item.objectKey || "").split("/").pop() || "";
-          match =
-            combinedList.find(df => df.fullPath === item.relPath) ||
-            combinedList.find(df => df.file.name === base) ||
-            combinedList[0];
-        }
-
-        const isManifestItem = looksLikeManifest(item) || match.file === manifestFile;
-
-        const putHeaders: any = {};
-        if (isManifestItem) {
-          putHeaders["Content-Type"] = "application/json";
-        } else if (item.contentType) {
-          putHeaders["Content-Type"] = item.contentType;
-        } else if (match.file.type) {
-          putHeaders["Content-Type"] = match.file.type;
-        }
-        if (item.sse === "AES256" || String(item.uploadUrl).includes("x-amz-server-side-encryption")) {
-          putHeaders["x-amz-server-side-encryption"] = "AES256";
-        }
-
-        const putRes = await fetch(item.uploadUrl, {
-          method: "PUT",
-          headers: putHeaders,
-          body: match.file,
-        });
-        if (!putRes.ok) {
-          const body = await putRes.text().catch(() => "");
-          throw new Error(`S3 PUT failed ${putRes.status} for ${item.relPath}: ${body}`);
-        }
-
-        const s3Key = item.objectKey ?? item.key ?? item.relPath;
-
-        if (!firstUploaded && !isManifestItem) {
-          // prefer a real content file as the archive seed key
-          firstUploaded = { key: s3Key, sha256: item.sha256 ?? item.hash };
-          setVaultStorage((prev) => ({ ...prev, archiveKey: s3Key }));
-        }
-
-        if (isManifestItem) {
-          uploadedManifestKey = s3Key;
-          setVaultStorage((prev) => ({ ...(prev || {}), manifestKey: s3Key, manifestRef: s3Key }));
-        }
-
-        done++;
-        setUploadPct(Math.round((done / items.length) * 100));
-      }
-
-      // Fallback: if only manifest was uploaded (edge), still set firstUploaded
-      if (!firstUploaded && uploadedManifestKey) {
-        firstUploaded = { key: uploadedManifestKey };
-      }
-      if (!firstUploaded) throw new Error("No files were uploaded");
-
-      // Optional verify
-      try {
-        const verifyRes = await fetch(api("/verify-upload"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ key: firstUploaded.key }),
-        });
-        if (!verifyRes.ok) {
-          console.warn("verify-upload non-200:", await verifyRes.text());
-        } else {
-          const v = await verifyRes.json();
-          if (!v.exists) { console.warn(`verify-upload: object not found yet (continuing): ${firstUploaded.key}`); }
-        }
-      } catch (e) {
-        console.warn("verify-upload skipped/failed:", e);
-      }
-
-
-      
-      // Mint after successful uploads
-  const mintRes = await finalizeAndMint(firstUploaded.key, uploadedManifestKey);
-
-
-
-      // capture manifest path(s) if server responds with them
-      if (mintRes?.manifestKey || mintRes?.manifestRef) {
-        setVaultStorage((prev) => ({
-          ...(prev || {}),
-          manifestKey: mintRes.manifestKey ?? uploadedManifestKey ?? prev?.manifestKey,
-          manifestRef: mintRes.manifestRef ?? uploadedManifestKey ?? prev?.manifestRef,
-        }));
-      }
-
-      return mintRes;
-    } finally {
-      setUploading(false);
+    const putRes = await fetch(item.uploadUrl, {
+      method: "PUT",
+      headers: {
+        "Content-Type": item.contentType || "application/octet-stream",
+        ...(item.sse ? { "x-amz-server-side-encryption": item.sse } : {}),
+      } as any,
+      body: fileBlob,
+    });
+    console.log(`${i+1} PUT`, item.objectKey, putRes.status);
+    if (!putRes.ok) {
+      const text = await putRes.text().catch(() => "");
+      throw new Error(`S3 PUT failed (${putRes.status}) for ${item.objectKey}: ${text}`);
     }
   }
 
+  // 3) Verify the primary object via manifestRef (avoids bucket/env drift)
+  const primary = items[0];
+  const manifestRef = uploadBucket ? `s3://${uploadBucket}/${primary.objectKey}` : undefined;
+  const vRes = await fetch(api("/verify-upload"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(manifestRef ? { manifestRef } : { key: primary.objectKey, bucket: uploadBucket }),
+  });
+  const vJson = await vRes.json().catch(() => ({}));
+  if (!(vJson?.ok && vJson?.exists)) {
+    throw new Error(`Upload verify failed: ${primary.objectKey} not found`);
+  }
+
+  // 4) Mint (server will also write manifest.json with manifestText)
+  const minted = await finalizeAndMint(primary.objectKey);
+
+  // 5) Best-effort: patch manifest.extra.manifestText to match UI
+  try { await forcePatchManifest(minted?.manifestKey ?? null, minted?.manifestRef ?? null); } catch {}
+
+  // 6) Stash S3 paths for the Vault view
+  setVaultStorage({
+    archiveKey: primary.objectKey,
+    manifestKey: minted?.manifestKey ?? undefined,
+    manifestRef: minted?.manifestRef ?? undefined,
+  });
+
+  return minted;
+}
+
   
 
-  // -------- Token modal preview helpers (auto-open + “View Token” button) --------
+  // -------- Token modal preview helpers (auto-open + â€œView Tokenâ€ button) --------
   const [showTokenModal, setShowTokenModal] = useState(false);
   const [tokenData, setTokenData] = useState<
     | null
@@ -738,7 +591,6 @@ export default function App() {
         contract: string;
         tokenId: string;
         owner: string;
-        chainId?: string;
         name: string;
         imageDataUrl: string;
         tokenUriJson: string;
@@ -759,7 +611,7 @@ export default function App() {
     const imageDataUrl = `data:image/svg+xml;base64,${btoa(svg)}`;
 
     const meta = {
-      name: `${vaultName || "Vault"} — FAWV Vault`,
+      name: `${vaultName || "Vault"} â€” FAWV Vault`,
       description: "FAWV Vault token (preview).",
       image: imageDataUrl,
       attributes: [
@@ -788,22 +640,24 @@ export default function App() {
       result?.tokenId ||
       "";
 
-    let name = `${vaultName || "Vault"} — FAWV Vault`;
+    let name = `${vaultName || "Vault"} â€” FAWV Vault`;
     let imageDataUrl = "";
     let tokenUriJson = "";
-    // --- get chainId (decimal) with fallbacks ---
-    let chainId = import.meta.env.VITE_CHAIN_ID || "11155111"; // Sepolia default
-    try {
-  const hex = await (window as any)?.ethereum?.request?.({ method: "eth_chainId" });
-  if (hex) chainId = String(parseInt(String(hex), 16));
-    } catch {
-  // ignore; keep fallback
-}
 
     if (result?.tokenURI) {
       try {
-// Option A: removed force-extra post-mint patch.
-} catch {
+        const r = await fetch(result.tokenURI, { mode: "cors" });
+        if (r.ok) {
+          const j = await r.json();
+          name = j?.name || name;
+          tokenUriJson = JSON.stringify(j, null, 2);
+          if (typeof j?.image === "string" && j.image.startsWith("data:image")) {
+            imageDataUrl = j.image;
+          } else if (typeof j?.image_data === "string") {
+            imageDataUrl = `data:image/svg+xml;base64,${btoa(j.image_data)}`;
+          }
+        }
+      } catch {
         // fall back
       }
     }
@@ -819,7 +673,6 @@ export default function App() {
       contract: contractAddr,
       tokenId: tokenId || "(unavailable)",
       owner,
-      chainId,
       name,
       imageDataUrl,
       tokenUriJson,
@@ -840,10 +693,7 @@ export default function App() {
       setStep("minting");
 
       const result = await uploadToS3(files);
-      // Enrich contract address fallback for popup
-      const _contractAddr = result?.contractAddress || result?.contract || (import.meta.env.VITE_CONTRACT_ADDRESS || null);
-      const enriched = { ...result, contractAddress: _contractAddr } as any;
-      setMintResult(enriched);
+      setMintResult(result);
 
       // Auto-open token modal with preview
       await openTokenPreviewFromMint(result);
@@ -851,8 +701,11 @@ export default function App() {
       setFlowStatus("idle");
       setStep("vault");
     } catch (err) {
-// Option A: removed force-extra post-mint patch.
-} finally {
+      console.error("Submit & Mint failed:", err);
+      setFlowStatus("error");
+      alert((err as Error).message);
+      setStep("manifest");
+    } finally {
       inFlightRef.current = false;
     }
   };
@@ -883,20 +736,6 @@ export default function App() {
     dirname(pickArchiveKey());
 
   // ---------------------- Render ----------------------
-
-// Build CAIP-19 compliant token string
-const DEFAULT_CHAIN_ID = "11155111"; // Sepolia fallback
-const chainId =
-  tokenData?.chainId ||
-  import.meta.env.VITE_CHAIN_ID ||      // Vite projects
-  DEFAULT_CHAIN_ID;
-
-const contractLc = (tokenData?.contract ?? "").toLowerCase();
-const tokenId = tokenData?.tokenId ?? "";
-const caip19 = contractLc && tokenId
-  ? `eip155:${chainId}/erc721:${contractLc}/${tokenId}`
-  : "";
-
   return (
     <div className="min-h-screen bg-gradient-to-b from-sky-950 via-teal-950 to-emerald-950 text-zinc-100">
       <header className="sticky top-0 z-10 backdrop-blur supports-[backdrop-filter]:bg-black/40 bg-black/60 border-b border-white/10">
@@ -936,11 +775,11 @@ const caip19 = contractLc && tokenId
                 </div>
                 <div className="p-6 rounded-2xl border border-white/10 bg-white/5">
                   <ul className="space-y-2 text-sm text-zinc-300">
-                    <li>• Drag an entire <span className="font-semibold">folder</span> into the uploader.</li>
-                    <li>• Name your Vault — this becomes the archive and token name.</li>
-                    <li>• Review demo pricing and accept before continuing.</li>
-                    <li>• Write your <span className="font-semibold">Vault Manifest</span> and choose Public or Private.</li>
-                    <li>• Submit & Mint — uploads to S3, writes manifest.json (with your manifest text), mints on Sepolia.</li>
+                    <li>â€¢ Drag an entire <span className="font-semibold">folder</span> into the uploader.</li>
+                    <li>â€¢ Name your Vault â€” this becomes the archive and token name.</li>
+                    <li>â€¢ Review demo pricing and accept before continuing.</li>
+                    <li>â€¢ Write your <span className="font-semibold">Vault Manifest</span> and choose Public or Private.</li>
+                    <li>â€¢ Submit & Mint â€” uploads to S3, writes manifest.json (with your manifest text), mints on Sepolia.</li>
                   </ul>
                 </div>
               </section>
@@ -1023,7 +862,7 @@ const caip19 = contractLc && tokenId
                     <div>
                       <h2 className="text-xl font-semibold mb-2">Upload your files (folder-aware)</h2>
                       <p className="text-sm text-zinc-400 mb-3">
-                        Drag a <span className="font-semibold">folder</span> here or click to pick. We’ll preserve your directory structure where provided.
+                        Drag a <span className="font-semibold">folder</span> here or click to pick. Weâ€™ll preserve your directory structure where provided.
                       </p>
 
                       <div
@@ -1034,9 +873,9 @@ const caip19 = contractLc && tokenId
                         className={`border-2 border-dashed rounded-2xl p-8 cursor-pointer transition ${dragActive ? "border-cyan-400 bg-white/5" : "border-white/10 bg-white/5"}`}
                       >
                         <div className="text-center">
-                          <div className="text-2xl">📁</div>
+                          <div className="text-2xl">ðŸ“</div>
                           <div className="mt-2 font-medium">Drop folder or files</div>
-                          <div className="text-xs text-zinc-400 mt-1">Or click to browse — folder selection supported</div>
+                          <div className="text-xs text-zinc-400 mt-1">Or click to browse â€” folder selection supported</div>
                         </div>
                         <input
                           ref={inputRef}
@@ -1144,7 +983,7 @@ const caip19 = contractLc && tokenId
                           </tr>
                           <tr>
                             <td className="py-2 text-zinc-400">Tokenization (per GB)</td>
-                            <td className="py-2 text-right">${PRICING.tokenizationPerGB.toFixed(2)} × {price.gb} = ${price.tokenization.toFixed(2)}</td>
+                            <td className="py-2 text-right">${PRICING.tokenizationPerGB.toFixed(2)} Ã— {price.gb} = ${price.tokenization.toFixed(2)}</td>
                           </tr>
                           <tr>
                             <td className="py-2 text-zinc-400">Storage</td>
@@ -1166,9 +1005,9 @@ const caip19 = contractLc && tokenId
                             <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-3 text-sm">
                               <div className="flex items-center justify-between">
                                 <div className="text-zinc-300">Endowment (not included in subtotal)</div>
-                                <div className="font-medium">${n.toFixed(2)} · {eth.toFixed(6)} ETH</div>
+                                <div className="font-medium">${n.toFixed(2)} Â· {eth.toFixed(6)} ETH</div>
                               </div>
-                              <div className="text-xs text-zinc-400 mt-1">Rate: ${demoEthPrice.toFixed(2)} / ETH · Finalized on Continue</div>
+                              <div className="text-xs text-zinc-400 mt-1">Rate: ${demoEthPrice.toFixed(2)} / ETH Â· Finalized on Continue</div>
                             </div>
                           );
                         }
@@ -1223,7 +1062,7 @@ const caip19 = contractLc && tokenId
                     <div className="p-6 rounded-2xl border border-white/10 bg-white/5">
                       <h3 className="font-semibold mb-2">What is the Vault Manifest?</h3>
                       <p className="text-sm text-zinc-300">
-                        A living record of what’s in your Vault. It could be a simple file listing and descriptions, an excerpt of a patent filing, or a plain-language narrative of why this Vault matters. If made <span className="font-semibold">Public</span>, it is discoverable by researchers and investors on FAWV search. If kept <span className="font-semibold">Private</span>, it stays hidden while EAS/Attestations remain timely — but becomes public if the Vault is ever orphaned/unclaimed.
+                        A living record of whatâ€™s in your Vault. It could be a simple file listing and descriptions, an excerpt of a patent filing, or a plain-language narrative of why this Vault matters. If made <span className="font-semibold">Public</span>, it is discoverable by researchers and investors on FAWV search. If kept <span className="font-semibold">Private</span>, it stays hidden while EAS/Attestations remain timely â€” but becomes public if the Vault is ever orphaned/unclaimed.
                       </p>
                     </div>
                   </div>
@@ -1241,8 +1080,8 @@ const caip19 = contractLc && tokenId
                         rows={14}
                         placeholder={`Example
 
-- 2001–2012 family photos (JPEG/RAW)
-- Patent: Photonic Memory Cell — excerpt of claims 1–5
+- 2001â€“2012 family photos (JPEG/RAW)
+- Patent: Photonic Memory Cell â€” excerpt of claims 1â€“5
 - Curated journal entries with context and captions
 `}
                         className="w-full px-3 py-2 rounded-2xl bg-black/40 border border-white/10 focus:outline-none focus:border-cyan-400"
@@ -1278,7 +1117,7 @@ const caip19 = contractLc && tokenId
                           />
                         </div>
                         {uploading && (
-                          <div className="text-xs text-zinc-400">Uploading… {uploadPct}%</div>
+                          <div className="text-xs text-zinc-400">Uploadingâ€¦ {uploadPct}%</div>
                         )}
                         <button onClick={() => setStep("pricing")} className="self-start px-3 py-2 rounded-2xl border border-white/10">Back</button>
                       </div>
@@ -1286,7 +1125,7 @@ const caip19 = contractLc && tokenId
 
                     <div className="p-6 rounded-2xl border border-white/10 bg-white/5">
                       <h3 className="font-semibold mb-2">Preview</h3>
-                      <div className="text-xs text-zinc-400 mb-2">Vault: {vaultName || "(unnamed)"} · Visibility: {visibility || "—"}</div>
+                      <div className="text-xs text-zinc-400 mb-2">Vault: {vaultName || "(unnamed)"} Â· Visibility: {visibility || "â€”"}</div>
                       <div className="rounded-2xl border border-white/10 bg-black/30 p-4 whitespace-pre-wrap break-words text-sm min-h-[8rem] max-w-full">{manifestText || "(Your manifest will render here.)"}</div>
                     </div>
                   </div>
@@ -1296,7 +1135,7 @@ const caip19 = contractLc && tokenId
                 {step === "minting" && (
                   <div className="p-10 rounded-2xl border border-white/10 bg-white/5 text-center">
                     <div className="mx-auto h-14 w-14 rounded-full border-4 border-white/20 border-t-cyan-400 animate-spin" />
-                    <div className="mt-4 text-xl font-semibold">Tokenizing & Minting your FAWV Vault…</div>
+                    <div className="mt-4 text-xl font-semibold">Tokenizing & Minting your FAWV Vaultâ€¦</div>
                     <div className="mt-1 text-sm text-zinc-400">Files are uploaded, <span className="font-semibold">manifest.json</span> (with your text) is written to S3, token minted on Sepolia.</div>
                   </div>
                 )}
@@ -1329,7 +1168,7 @@ const caip19 = contractLc && tokenId
                           </tr>
                           <tr>
                             <td className="py-2 text-zinc-400">Archive Hash</td>
-                            <td className="py-2 text-right font-mono text-xs break-all">{archiveHash || "—"}</td>
+                            <td className="py-2 text-right font-mono text-xs break-all">{archiveHash || "â€”"}</td>
                           </tr>
                           <tr>
                             <td className="py-2 text-zinc-400">Visibility</td>
@@ -1340,13 +1179,13 @@ const caip19 = contractLc && tokenId
                           <tr>
                             <td className="py-2 text-zinc-400 align-top">Vault Path (S3 folder)</td>
                             <td className="py-2 text-right font-mono text-xs break-all">
-                              {vaultFolderPath || "—"}
+                              {vaultFolderPath || "â€”"}
                             </td>
                           </tr>
                           <tr>
                             <td className="py-2 text-zinc-400 align-top">Manifest Key/Ref</td>
                             <td className="py-2 text-right font-mono text-xs break-all">
-                              {pickManifestRef() || pickManifestKey() || "—"}
+                              {pickManifestRef() || pickManifestKey() || "â€”"}
                             </td>
                           </tr>
 
@@ -1354,14 +1193,14 @@ const caip19 = contractLc && tokenId
                             <td className="py-2 text-zinc-400">Endowment</td>
                             <td className="py-2 text-right">
                               {lockedEndowment
-                                ? `$${lockedEndowment.usd.toFixed(2)} · ${lockedEndowment.eth.toFixed(6)} ETH`
+                                ? `$${lockedEndowment.usd.toFixed(2)} Â· ${lockedEndowment.eth.toFixed(6)} ETH`
                                 : "None"}
                             </td>
                           </tr>
                           <tr>
                             <td className="py-2 text-zinc-400">Endowment Rate</td>
                             <td className="py-2 text-right">
-                              {lockedEndowment ? `$${lockedEndowment.usdPerEth.toFixed(2)} / ETH` : "—"}
+                              {lockedEndowment ? `$${lockedEndowment.usdPerEth.toFixed(2)} / ETH` : "â€”"}
                             </td>
                           </tr>
                           <tr>
@@ -1394,70 +1233,13 @@ const caip19 = contractLc && tokenId
                         <button onClick={resetFlow} className="px-3 py-2 rounded-2xl border border-white/10">Build Another Vault</button>
                       </div>
 
-                     {mintResult && (
-  <div className="mt-4 text-sm text-zinc-300 space-y-1">
-    {/* Show your content hash too, if the API returns it */}
-    {mintResult.token && (
-      <div>
-        Token: <span className="font-mono break-all">{mintResult.token}</span>
-      </div>
-    )}
-
-    {mintResult.tokenId && (
-      <div>
-        Token ID: <span className="font-mono break-all">{mintResult.tokenId}</span>
-      </div>
-    )}
-
-    {(mintResult.contractAddress || import.meta.env.VITE_CONTRACT_ADDRESS) && (
-      <div>
-        Contract:{" "}
-        <a
-          className="underline"
-          href={`${explorerBase}/address/${
-            mintResult.contractAddress ?? import.meta.env.VITE_CONTRACT_ADDRESS
-          }`}
-          target="_blank"
-          rel="noreferrer"
-        >
-          {short(mintResult.contractAddress ?? import.meta.env.VITE_CONTRACT_ADDRESS)}
-        </a>
-      </div>
-    )}
-
-    {mintResult.txHash && (
-      <div className="flex items-center gap-2">
-        <span>TxHash:</span>
-        <a
-          className="underline font-mono break-all"
-          title={mintResult.txHash}
-          href={`${explorerBase}/tx/${mintResult.txHash}`}
-          target="_blank"
-          rel="noreferrer"
-        >
-          {mintResult.txHash}
-        </a>
-        <button
-          className="text-xs underline"
-          onClick={() => navigator.clipboard?.writeText(mintResult.txHash)}
-        >
-          copy
-        </button>
-      </div>
-    )}
-
-    {mintResult.tokenURI && (
-      <div className="truncate" title={mintResult.tokenURI}>
-        tokenURI:{" "}
-        <a className="underline" href={mintResult.tokenURI} target="_blank" rel="noreferrer">
-          {mintResult.tokenURI}
-        </a>
-      </div>
-    )}
-  </div>
-)}
-
-
+                      {mintResult?.txHash && (
+                        <div className="mt-4 text-sm text-zinc-300 space-y-1">
+                          <div>txHash: <span className="font-mono break-all">{mintResult.txHash}</span></div>
+                          {mintResult.tokenId && <div>tokenId: <span className="font-mono break-all">{mintResult.tokenId}</span></div>}
+                          {mintResult.tokenURI && <div>tokenURI: <span className="font-mono break-all">{mintResult.tokenURI}</span></div>}
+                        </div>
+                      )}
                     </div>
 
                     {/* Right Column: Manifest + Archive Contents */}
@@ -1508,13 +1290,12 @@ const caip19 = contractLc && tokenId
       </footer>
 
       {/* Token Modal */}
-      
       {showTokenModal && tokenData && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="w-full max-w-2xl rounded-2xl border border-white/10 bg-zinc-950 overflow-hidden shadow-2xl">
             <div className="p-4 border-b border-white/10 flex items-center justify-between">
               <div className="font-semibold">FAWV Vault Token</div>
-              <button onClick={() => setShowTokenModal(false)} className="text-zinc-400 hover:text-zinc-200" aria-label="Close">✕</button>
+              <button onClick={() => setShowTokenModal(false)} className="text-zinc-400 hover:text-zinc-200" aria-label="Close">âœ•</button>
             </div>
             <div className="p-4 grid md:grid-cols-2 gap-4 items-start max-h-[70vh] overflow-auto">
               <img src={tokenData.imageDataUrl} alt="token" className="rounded-2xl w-full border border-white/10" />
@@ -1541,12 +1322,10 @@ const caip19 = contractLc && tokenId
                       <td className="py-1 text-zinc-400">Token ID</td>
                       <td className="py-1 text-right font-mono break-all max-w-[26ch]">{tokenData.tokenId}</td>
                     </tr>
-                   <tr>
-                      <td className="py-1 text-zinc-400">Chain ID</td>
-                       <td className="py-1 text-right font-mono break-all max-w-[26ch]">
-                       {tokenData.chainId || (import.meta.env.VITE_CHAIN_ID || "11155111")}
-                     </td>
-                  </tr>
+                    <tr>
+                      <td className="py-1 text-zinc-400">Owner</td>
+                      <td className="py-1 text-right font-mono break-all max-w-[26ch]">{tokenData.owner}</td>
+                    </tr>
                   </tbody>
                 </table>
 
@@ -1556,24 +1335,15 @@ const caip19 = contractLc && tokenId
                 </div>
               </div>
             </div>
-           <div className="flex justify-end gap-2">
-             <button
-                  onClick={() => navigator.clipboard?.writeText(caip19)}
-                   disabled={!caip19}
-                   className="px-4 py-2 rounded-2xl bg-cyan-500 hover:bg-cyan-400 text-black font-semibold"
-                   title={caip19 || "Nothing to copy"}
-                    >
-                   Copy Token
+            <div className="p-4 border-t border-white/10 flex items-center justify-end gap-2">
+              <button
+                onClick={() => copy(`${tokenData.contract}:${tokenData.tokenId}`)}
+                className="px-3 py-2 rounded-2xl bg-cyan-500 hover:bg-cyan-400 text-black font-semibold"
+              >
+                Copy &ldquo;contract:tokenId&rdquo;
               </button>
-
-               <button
-                   onClick={() => setShowTokenModal(false)}
-                   className="px-3 py-2 rounded-2xl border border-white/10"
-                    >
-                   Close
-               </button>
+              <button onClick={() => setShowTokenModal(false)} className="px-3 py-2 rounded-2xl border border-white/10">Close</button>
             </div>
-
           </div>
         </div>
       )}
@@ -1589,7 +1359,7 @@ function Landing({ onCTAClick }: { onCTAClick: () => void }) {
         <div className="p-2">
           <h1 className="text-4xl md:text-5xl font-bold leading-tight">For All We Value</h1>
           <p className="mt-4 text-zinc-300 text-lg">
-            FAWV is a digital trust platform for preserving and passing forward your most valuable data —
+            FAWV is a digital trust platform for preserving and passing forward your most valuable data â€”
             with programmable permanence, escrow grace, and 100-year heirloom options.
           </p>
           <div className="mt-6 flex gap-3">
@@ -1599,11 +1369,11 @@ function Landing({ onCTAClick }: { onCTAClick: () => void }) {
         </div>
         <div className="p-6 rounded-3xl border border-white/10 bg-white/5">
           <ul className="space-y-3 text-sm text-zinc-300">
-            <li>• Permanence — annual EAS keeps Vaults in good standing</li>
-            <li>• Permanence+ — 3/5/10-year escrow grace to avoid immediate market release</li>
-            <li>• Heirloom — 100-year guarantee, no annual EAS required</li>
-            <li>• Public/Private Manifest — searchable discovery or private until orphaned</li>
-            <li>• Folder-aware uploads — preserve directory structure</li>
+            <li>â€¢ Permanence â€” annual EAS keeps Vaults in good standing</li>
+            <li>â€¢ Permanence+ â€” 3/5/10-year escrow grace to avoid immediate market release</li>
+            <li>â€¢ Heirloom â€” 100-year guarantee, no annual EAS required</li>
+            <li>â€¢ Public/Private Manifest â€” searchable discovery or private until orphaned</li>
+            <li>â€¢ Folder-aware uploads â€” preserve directory structure</li>
           </ul>
         </div>
       </div>
@@ -1613,7 +1383,7 @@ function Landing({ onCTAClick }: { onCTAClick: () => void }) {
           <div key={t} className="p-5 rounded-2xl border border-white/10 bg-white/5">
             <div className="text-2xl">{i + 1}.</div>
             <div className="mt-2 font-semibold">{t}</div>
-            <div className="text-sm text-zinc-400 mt-1">Guided flow — uploads → manifest → Sepolia mint via API.</div>
+            <div className="text-sm text-zinc-400 mt-1">Guided flow â€” uploads â†’ manifest â†’ Sepolia mint via API.</div>
           </div>
         ))}
       </div>
