@@ -2,6 +2,9 @@
 import express from "express";
 import cors from "cors";
 import routes from "../routes.js"; // existing app routes (ESM ok)
+import manifestTools from "./routes.manifest-tools.js";
+app.use("/api", manifestTools);
+
 
 // --- Inline: minimal POST /api/manifest/force-extra ---
 import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
