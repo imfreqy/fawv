@@ -915,7 +915,7 @@ const caip19 = contractLc && tokenId
           </div>
           <div className="flex items-center gap-3 text-sm text-zinc-300">
             <button onClick={() => setMode("landing")} className={`px-3 py-1 rounded-lg border ${mode === "landing" ? "border-cyan-400 text-cyan-300" : "border-white/10"}`}>Home</button>
-            <button onClick={() => { setMode("demo"); setStarted(true); }} className={`px-3 py-1 rounded-lg border ${mode === "demo" ? "border-cyan-400 text-cyan-300" : "border-white/10"}`}>Build a Vault</button>
+            <button onClick={() => { setMode("demo"); setStarted(true); }} className={`px-3 py-1 rounded-lg border ${mode === "demo" ? "border-cyan-400 text-cyan-300" : "border-white/10"}`}>Build a Vault</button> <a href="https://drive.google.com/drive/u/0/folders/1zj2KWFCstzxTSyZghjI86YtI4xI_7VQN" target="_blank" rel="noreferrer" className="px-3 py-1 rounded-lg border border-white/10 hover:border-cyan-400">FAWV White Papers</a>
           </div>
         </div>
       </header>
