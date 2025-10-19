@@ -1521,9 +1521,33 @@ const caip19 = contractLc && tokenId
         )}
       </main>
 
-      <footer className="mx-auto max-w-6xl px-4 py-10 text-xs text-zinc-500">
-        Demo pricing and flows are illustrative. Sepolia mint is invoked by the API when configured.
-      </footer>
+      <footer className="mx-auto max-w-6xl px-4 py-10 text-xs text-zinc-400">
+  <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+    <div className="grid md:grid-cols-3 gap-4 items-start">
+      <div>
+        <div className="font-semibold text-zinc-200">Trademark</div>
+        <p className="mt-1 leading-relaxed">
+          FAWV<span aria-hidden="true">™</span> is a trademark and the branding, UI, and copy herein are proprietary.
+        </p>
+      </div>
+      <div>
+        <div className="font-semibold text-zinc-200">Patent Notice</div>
+        <p className="mt-1 leading-relaxed">
+          U.S. Provisional Patent Pending. Certain features are the subject of one or more pending patent applications.
+        </p>
+      </div>
+      <div>
+        <div className="font-semibold text-zinc-200">Confidentiality</div>
+        <p className="mt-1 leading-relaxed">
+          This demo and related materials are confidential and provided for evaluation only. No license or rights are granted. Do not copy, distribute, or reverse engineer.
+        </p>
+      </div>
+    </div>
+    <div className="mt-4 border-t border-white/10 pt-3 text-zinc-500">
+      Demo pricing and flows are illustrative. Sepolia mint is invoked by the API when configured.
+    </div>
+  </div>
+</footer>
 
       {/* Token Modal */}
       
