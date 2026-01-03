@@ -2,8 +2,12 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path"; // ESM-safe import
 
-export default defineConfig({
-  plugins: [react()],
+export default defineConfig(({ mode }) => {
+  const isDemo = mode === 'demo'
+
+  return {
+    plugins: [react()],
+    base: isDemo ? '/demo/' : '/',
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src"),
@@ -20,4 +24,5 @@ export default defineConfig({
       },
     },
   },
+  };
 });
